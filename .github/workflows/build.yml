@@ -1,0 +1,25 @@
+name: Makefile CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Install dependencies
+      run: bash -c 'echo '"'"'deb http://download.opensuse.org/repositories/home:/strik/xUbuntu_23.04/ /'"'"' | sudo tee /etc/apt/sources.list.d/home:strik.list && curl -fsSL https://download.opensuse.org/repositories/home:strik/xUbuntu_23.04/Release.key | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/home_strik.gpg > /dev/null && sudo apt update -y && sudo apt install cc65 -y'
+    - uses: actions/checkout@v3
+
+    - name: Build the project
+      run: make            
+    - name: Upload the X16 program
+      uses: actions/upload-artifact@v3.1.3
+      with:
+        name: b16view
+        path: b16view.cx16
+    
