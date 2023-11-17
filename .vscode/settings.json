@@ -1,0 +1,16 @@
+{
+    "files.associations": {
+		"cx16.h": "c",
+		"stdbool.h": "c",
+		"stdint.h": "c",
+		"conio.h": "c",
+		"stdio.h": "c",
+		"string.h": "c",
+		"mouse.h": "c",
+		"stdlib.h": "c",
+		"cbm.h": "c",
+		"vera.h": "c"
+	},
+    "C_Cpp.default.compilerPath": "",
+	"C_Cpp.intelliSenseEngine": "default"
+}

@@ -1,0 +1,24 @@
+{
+    "configurations": [
+        {
+            "name": "CC65",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "/usr/share/cc65/include"
+            ],
+            "defines": [
+                "__CX16__",
+				"__fastcall__=",
+				"fastcall=",
+				"__asm__(...)=",
+				"asm(...)=",
+				"cdecl=",
+				"__cdecl__="
+            ],
+            "cStandard": "c99",
+            "cppStandard": "gnu++17",
+            "intelliSenseMode": "linux-gcc-x64"
+        }
+    ],
+    "version": 4
+}
