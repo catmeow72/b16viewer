@@ -8,11 +8,8 @@
 #include "vera.h"
 #include "macptr.h"
 #include "debug.h"
+#include "fill.h"
 uint8_t palette[512];
-uint8_t *image = BANK_RAM;
-uint8_t *image_end = BANK_RAM;
-uint8_t ram_bank_begin = 1;
-uint8_t ram_bank_end = 1;
 uint8_t vera_bit_depth;
 uint8_t bitdepth;
 uint16_t width, height;
@@ -58,18 +55,31 @@ bool checkheader() {
 	printf("%s%c=%s\n", tested, valid ? '=' : '!', header);
 	return valid;
 }
-void change_bank(uint8_t bank) {
-	if (RAM_BANK != bank) {
-		printf("Switching RAM bank to %u\n", bank);
-		RAM_BANK = bank;
-	}
+void updatescale() {
+	uint8_t hscale;
+	uint8_t vscale;
+	VERA.control &= 0b10000001;
+	hscale = VERA.display.hscale;
+	vscale = VERA.display.vscale;
+	oldhscale = hscale;
+	oldvscale = vscale;
+	if (over320) return;
+	if (hscale > 64) VERA.display.hscale = 64;
+	if (vscale > 64) VERA.display.vscale = 64;
 }
-int readfile(const char *filename) {
-	uint16_t i;
-	uint16_t i_max;
-	uint8_t banki;
-	uint8_t j;
-	uint8_t *ptr;
+void restorescale() {
+	VERA.control &= 0b10000001;
+	VERA.display.hscale = oldhscale;
+	VERA.display.vscale = oldvscale;
+}
+int uploadimage(const char *filename) {
+	size_t i = 0, j = 0, x = 0, y = 0, value = 0, bitmask = 0;
+	size_t vera_w = 320, vera_h = 240;
+	uint16_t vera_max = 0;
+	uint32_t tmp = 0, vera_max_32 = 0;
+	bool vera_max_bank = 1;
+	uint8_t config = 0b00000100;
+	uint16_t bytes_read;
 	uint8_t version;
 	bool all_significant;
 	cbm_k_setnam(filename);
@@ -90,6 +100,8 @@ int readfile(const char *filename) {
 		return 1;
 	}
 	vera_bit_depth = read8();
+	vera_bit_depth &= 0b11;
+	config |= vera_bit_depth;
 	if (vera_bit_depth > 3) {
 		printf("Error: VERA bit depth was invalid!\n");
 	}
@@ -110,7 +122,7 @@ int readfile(const char *filename) {
 		all_significant = true;
 		significant_palette_start = 0;
 	} else {
-		printf("%u palette entries starting at %u significant.\n", significant_palette_entries, significant_palette_start);
+		printf("%u palette entries significant\nstarting at %u.\n", significant_palette_entries, significant_palette_start);
 	}
 	printf("Skipping reserved bytes...\n");
 	for (i = 0; i < 19; i++) {
@@ -126,63 +138,13 @@ int readfile(const char *filename) {
 			palette[i] = get_from_backed_up_palette(i);
 		}
 	}
-	image_end = (imgdatabytes % 8192) + image;
-	ram_bank_end = (imgdatabytes / 8192) + 1;
-	printf("Image: (bank %u, addr %u) => (bank %u, addr %u)\n", ram_bank_begin, image - BANK_RAM, ram_bank_end, image_end - BANK_RAM);
-	ptr = BANK_RAM;
-	change_bank(ram_bank_begin);
-	while (1) {
-		uint16_t bytes_read = cx16_k_macptr(0, ptr);
-		ptr += bytes_read;
-		while (ptr > (void*)0xBFFF) {
-			ptr -= 0x2000;
-		}
-		banki = RAM_BANK;
-		printf("Wrote %u bytes\n", i_max, banki);
-		if (bytes_read == 0) {
-			if (banki == ram_bank_end) {
-				break;
-			}
-			return 1;
-		}
-	}
-	cbm_k_clrch();
-	cbm_k_close(2);
-	return 0;
-}
-void updatescale() {
-	uint8_t hscale;
-	uint8_t vscale;
-	VERA.control &= 0b10000001;
-	hscale = VERA.display.hscale;
-	vscale = VERA.display.vscale;
-	oldhscale = hscale;
-	oldvscale = vscale;
-	if (over320) return;
-	if (hscale > 64) VERA.display.hscale = 64;
-	if (vscale > 64) VERA.display.vscale = 64;
-}
-void restorescale() {
-	VERA.control &= 0b10000001;
-	VERA.display.hscale = oldhscale;
-	VERA.display.vscale = oldvscale;
-}
-void uploadimage() {
-	size_t i = 0, j = 0, x = 0, y = 0, value = 0, bitmask = 0;
-	size_t vera_w = 320, vera_h = 240;
-	uint16_t hiram_i = 0;
-	uint8_t hiram_bank = ram_bank_begin;
-	uint16_t vera_max = 0;
-	uint32_t tmp = 0;
-	bool vera_max_bank = 1;
-	uint8_t config = 0b00000100 | vera_bit_depth;
 	if (over320) {
 		vera_w *= 2;
 		vera_h *= 2;
 	}
-	tmp = ((uint32_t)vera_w * (uint32_t)vera_h)/(uint32_t)pixels_per_byte;
-	vera_max = tmp;
-	vera_max_bank = tmp >> 16;
+	vera_max_32 = ((uint32_t)vera_w * (uint32_t)vera_h)/(uint32_t)pixels_per_byte;
+	vera_max = vera_max_32;
+	vera_max_bank = vera_max_32 >> 16;
 	VERA.layer0.config = config;
 	VERA.layer0.tilebase = over320 ? 1 : 0;
 	printf("Loading image bytes: $%lx\n", imgdatabytes);
@@ -190,32 +152,47 @@ void uploadimage() {
 	VERA.control &= ~0b1;
 	VERA.address = 0;
 	VERA.address_hi = 0b00010000;
-	RAM_BANK = hiram_bank;
-	for (x = 0; VERA.address < vera_max || (vera_max_bank & 0b1) != (VERA.address_hi & 0b1); x+=pixels_per_byte) {
-		if (x >= vera_w) {
-			x -= vera_w;
-			y++;
+	i = 0;
+	// Calculate the filler value.
+	value = 0;
+	bitmask = (1 << bitdepth) - 1;
+	for (i = 0; i < pixels_per_byte; i++) {
+		value |= (filleridx & bitmask) << (i * bitdepth);
+	}
+	// Upload the bitmap
+	for (x = 0; VERA.address < vera_max || (vera_max_bank & 0b1) != (VERA.address_hi & 0b1);) {
+		tmp = (((uint32_t)VERA.address) + ((uint32_t)(VERA.address_hi & 0b1) << 16));
+		x = tmp % (uint32_t)(vera_w/pixels_per_byte);
+		y = tmp / (uint32_t)(vera_w/pixels_per_byte);
+		if (y >= height) {
+			break;
 		}
 		if (x < width && y < height) {
-			VERA.data0 = image[hiram_i];
-			hiram_i++;
-			if (hiram_i >= 8192) {
-				hiram_i -= 8192;
-				hiram_bank++;
-				RAM_BANK = hiram_bank;
+			bytes_read = cx16_k_macptr((width - x)/pixels_per_byte, false, &VERA.data0);
+			if (bytes_read == 0) {
+				printf("Error reading file!\n");
+				return 1;
 			}
 		} else {
-			value = 0;
-			bitmask = (1 << bitdepth) - 1;
-			for (i = 0; i < pixels_per_byte; i++) {
-				value |= (filleridx & bitmask) << (i * bitdepth);
+			for (; x < vera_w/pixels_per_byte; x++) {
+				VERA.data0 = value;
 			}
-			VERA.data0 = value;
+		}
+	}
+	for (; VERA.address < vera_max || (vera_max_bank & 0b1) != (VERA.address_hi & 0b1);) {
+		tmp = vera_max_32 - (((uint32_t)VERA.address) | ((uint32_t)(VERA.address_hi & 0b1) << 16));
+		if (tmp & ((uint32_t)1 << 16)) {
+			fill_vera(0xFFFF, value);
+		} else {
+			fill_vera(tmp, value);
 		}
 	}
 	upload_palette(palette);
+	updatescale();
 	vera_layer_enable(0b11);
-	return;
+	cbm_k_clrch();
+	cbm_k_close(2);
+	return 0;
 }
 void set_text_color(uint8_t color) {
 	uint16_t mw, mh;
@@ -253,13 +230,8 @@ int main(int argc, char **argv) {
 	clrscr();
 	gotoxy(0, 0);
 	printf("Loading file...\n");
-	ret = readfile(buf);
+	ret = uploadimage(buf);
 	if (ret != 0) return ret;
-	clrscr();
-	gotoxy(0, 0);
-	printf("File loaded. Uploading to VERA.\n");
-	updatescale();
-	uploadimage();
 	set_text_256color(true);
 	printf("Press arrow keys to change text colors.");
 	gotoxy(0, 0);
