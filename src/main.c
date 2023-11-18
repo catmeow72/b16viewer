@@ -6,6 +6,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include "vera.h"
+#include "macptr.h"
 #include "debug.h"
 uint8_t palette[512];
 uint8_t *image = BANK_RAM;
@@ -128,13 +129,21 @@ int readfile(const char *filename) {
 	image_end = (imgdatabytes % 8192) + image;
 	ram_bank_end = (imgdatabytes / 8192) + 1;
 	printf("Image: (bank %u, addr %u) => (bank %u, addr %u)\n", ram_bank_begin, image - BANK_RAM, ram_bank_end, image_end - BANK_RAM);
-	for (banki = ram_bank_begin; banki <= ram_bank_end; banki++) {
-		change_bank(banki);
-		i_max = (banki == ram_bank_end) ? (uint16_t)(image_end - image) : 8192;
-		printf("Writing %u bytes to bank %u\n", i_max, banki);
-		for (i = 0; i < i_max; i++) {
-			ptr = (i % 8192) + image;
-			*ptr = read8();
+	ptr = BANK_RAM;
+	change_bank(ram_bank_begin);
+	while (1) {
+		uint16_t bytes_read = cx16_k_macptr(0, ptr);
+		ptr += bytes_read;
+		while (ptr > (void*)0xBFFF) {
+			ptr -= 0x2000;
+		}
+		banki = RAM_BANK;
+		printf("Wrote %u bytes\n", i_max, banki);
+		if (bytes_read == 0) {
+			if (banki == ram_bank_end) {
+				break;
+			}
+			return 1;
 		}
 	}
 	cbm_k_clrch();
