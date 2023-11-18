@@ -77,6 +77,8 @@ int uploadimage(const char *filename) {
 	size_t vera_w = 320, vera_h = 240;
 	uint16_t vera_max = 0;
 	uint32_t tmp = 0, vera_max_32 = 0;
+	uint16_t vera_adr_bak;
+	uint8_t vera_adr_h_bak;
 	bool vera_max_bank = 1;
 	uint8_t config = 0b00000100;
 	uint16_t bytes_read;
@@ -161,28 +163,35 @@ int uploadimage(const char *filename) {
 	}
 	// Upload the bitmap
 	for (x = 0; VERA.address < vera_max || (vera_max_bank & 0b1) != (VERA.address_hi & 0b1);) {
-		tmp = (((uint32_t)VERA.address) + ((uint32_t)(VERA.address_hi & 0b1) << 16));
-		x = tmp % (uint32_t)(vera_w/pixels_per_byte);
+		tmp = ((((uint32_t)VERA.address) + ((uint32_t)(VERA.address_hi & 0b1) << 16)));
+		x = (tmp % (uint32_t)(vera_w/pixels_per_byte))*pixels_per_byte;
 		y = tmp / (uint32_t)(vera_w/pixels_per_byte);
+		#if 0
+		vera_adr_bak = VERA.address;
+		vera_adr_h_bak = VERA.address_hi;
+		printf("Y: %u, X: %u, tmp: %lu,\nvera_w: %u\nvera_adr: %u, vera_adr_h: %s\n", y, x, tmp, vera_w, vera_adr_bak, (vera_adr_h_bak & 1) ? "1" : "0");
+		VERA.address = vera_adr_bak;
+		VERA.address_hi = vera_adr_h_bak;
+		#endif
 		if (y >= height) {
 			break;
 		}
 		if (x < width && y < height) {
-			bytes_read = cx16_k_macptr((width - x)/pixels_per_byte, false, &VERA.data0);
-			if (bytes_read == 0) {
-				printf("Error reading file!\n");
-				return 1;
-			}
+			bytes_read = cx16_k_macptr((((width) - x))/pixels_per_byte, false, &VERA.data0);
 		} else {
-			for (; x < vera_w/pixels_per_byte; x++) {
-				VERA.data0 = value;
+			//VERA.data0 = value;
+			tmp = (vera_w-x)/pixels_per_byte;
+			if (tmp >= ((uint32_t)1 << 8)) {
+				fill_vera(0xFF, value);
+			} else {
+				fill_vera(tmp, value);
 			}
 		}
 	}
 	for (; VERA.address < vera_max || (vera_max_bank & 0b1) != (VERA.address_hi & 0b1);) {
 		tmp = vera_max_32 - (((uint32_t)VERA.address) | ((uint32_t)(VERA.address_hi & 0b1) << 16));
-		if (tmp & ((uint32_t)1 << 16)) {
-			fill_vera(0xFFFF, value);
+		if (tmp >= ((uint32_t)1 << 8)) {
+			fill_vera(0xFF, value);
 		} else {
 			fill_vera(tmp, value);
 		}

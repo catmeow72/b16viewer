@@ -3,40 +3,27 @@ r0l := $02
 r0h := $03
 vera_data0 := $9f23
 .export _fill_vera
-.import popax
+.import popa
 .segment "CODE"
 _fill_vera:
 	sta vera_fill_data
-	jsr popax
+	jsr popa
 	sta max
-	stx max+1
 	lda max
-	cmp #0
-	bne @fill
-@max_l_zero:
-	lda max+1
 	cmp #0
 	beq @end
 @fill:
 	ldx #0
 	lda vera_fill_data
-@loopx:
-	ldy #0
-@loopy:
+@loop:
 	sta vera_data0
-	iny
-	cpy max
-	bne @loopy
-@loopxend:
 	inx
-	cpx max+1
-	bne @loopx
+	cpx max
+	bne @loop
 @end:
 	rts
 .segment "BSS"
-tmp:
-	.res 2
 max:
-	.res 2
+	.res 1
 vera_fill_data:
 	.res 1
