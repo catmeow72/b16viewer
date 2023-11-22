@@ -6,22 +6,21 @@ vera_data0 := $9f23
 .import popa
 .segment "CODE"
 _fill_vera:
-	sta vera_fill_data
-	jsr popa
-	sta max
-	lda max
-	cmp #0
-	beq @end
+	sta vera_fill_data ; Save the value to fill the vera with
+	jsr popa ; Get the length parameter
+	sta max ; Store the max value
+	cmp #0  ; Make sure it's not 0
+	beq @end ; If it is, we're already done
 @fill:
-	ldx #0
-	lda vera_fill_data
+	ldx #0 ; Initialize X
+	lda vera_fill_data ; Load the fill value
 @loop:
-	sta vera_data0
-	inx
-	cpx max
-	bne @loop
+	sta vera_data0 ; Store the fill value
+	inx ; Increment X
+	cpx max ; Compare it against the maximum value
+	bne @loop ; If it's not the max yet, do it again
 @end:
-	rts
+	rts ; We're done!
 .segment "BSS"
 max:
 	.res 1
