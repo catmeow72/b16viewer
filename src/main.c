@@ -172,12 +172,12 @@ int uploadimage(const char *filename) {
 	if ((int8_t)read8() == -1) {
 		compress = true;
 	};
+	// Load the border color
+	borderidx = read8();
 	printf("Skipping reserved bytes...\n");
 	for (i = 0; i < 16; i++) {
 		read8();
 	}
-	// Load the border color
-	borderidx = read8();
 	printf("Border color: %02x\n", borderidx);
 	printf("Reading palette entries...\n");
 	for (i = 0; i < (uint16_t)significant_palette_entries*2; i++) {
