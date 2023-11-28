@@ -166,7 +166,6 @@ int uploadimage(const char *filename) {
 		printf("%u palette entries significant\nstarting at %u.\n", significant_palette_entries, significant_palette_start);
 	}
 	imgdatastart = read16();
-	--imgdatastart;
 	printf("Image starts at 0-indexed offset %4x\n", imgdatastart);
 	direct_to_vera = width == vera_w && height == vera_h;
 	if ((int8_t)read8() == -1) {
