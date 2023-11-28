@@ -13,7 +13,7 @@ TARGETS := cx16
 
 # Name of the final, single-file executable.
 # Default: name of the current dir with target name appended
-PROGRAM := b16view
+PROGRAM := bmxview
 
 # Path(s) to additional libraries required for linking the program
 # Use only if you don't want to place copies of the libraries in SRCDIR
