@@ -1,4 +1,8 @@
 *.cx16
 *.lbl
 *.BMX
+*.zip
+*.prg
+*.PRG
 obj/
+!dist/*.BMX
