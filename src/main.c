@@ -179,15 +179,9 @@ int uploadimage(const char *filename) {
 	}
 	printf("Border color: %02x\n", borderidx);
 	printf("Reading palette entries...\n");
-	for (i = 0; i < (uint16_t)significant_palette_entries*2; i++) {
-		j = i >> 1;
+	for (i = 0; i < (all_significant ? 512 : (uint16_t)significant_palette_entries*2); i++) {
 		// Only load the required palette entries
-		if (all_significant || j >= significant_palette_start && j < significant_palette_start+significant_palette_entries || j == borderidx) {
-			palette[i] = read8();
-		} else {
-			read8();
-			palette[i] = get_from_backed_up_palette(i);
-		}
+		palette[i+(significant_palette_start*2)] = read8();
 	}
 	// If the VERA was set up for a 640p image, make sure to keep track of that
 	if (over320) {
