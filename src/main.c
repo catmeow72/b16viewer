@@ -19,30 +19,76 @@ bool compress;
 bool direct_to_vera;
 uint16_t imgdatastart;
 uint32_t imgdatabytes;
+size_t palette_size = 0;
+size_t palette_entry_count = 0;
+size_t palette_start_byte = 0;
+size_t vera_w, vera_h;
 uint8_t pixels_per_byte;
 uint8_t borderidx = 255;
 bool over320;
 uint8_t oldhscale, oldvscale;
 uint8_t significant_palette_entries;
 uint8_t significant_palette_start;
+size_t expected_data_begin = 0;
 uint8_t *image_start = BANK_RAM;
+typedef enum {
+	LZSA2 = -1,
+	NONE = 0,
+} CompressionType;
+CompressionType compression_type = 0;
+uint32_t filepos = 0;
 /// @brief Reads a 16 bit little endian value from LFN 2
 /// @return The 16 bit value
 uint16_t read16() {
 	cbm_k_chkin(2);
+	filepos++;
+	filepos++;
 	return ((cbm_k_chrin())) | ((uint16_t)cbm_k_chrin() << 8);
 }
 /// @brief Reads an 8 bit value and returns it as a character
 /// @return The character
 char readchar() {
 	cbm_k_chkin(2);
+	filepos++;
 	return cbm_k_chrin();
 }
 /// @brief Reads an unsigned 8 bit value and returns it as is
 /// @return The unsigned 8 bit value
 uint8_t read8() {
 	cbm_k_chkin(2);
+	filepos++;
 	return cbm_k_getin();
+}
+size_t readbuf(void *ptr, size_t max, bool incr) {
+	size_t i = 0;
+	size_t read_bytes = 255;
+	// Do while loop for special case of max 0 where we read as many bytes as possible.
+	do {
+		if (max == 0) {
+			read_bytes = 0;
+		} else if (max - i > 255) {
+			read_bytes = 255;
+		} else {
+			read_bytes = max - i;
+		}
+		read_bytes = cx16_k_macptr(read_bytes, incr, ptr);
+		filepos += read_bytes;
+		i += read_bytes;
+	} while (max != 0 && i < max && read_bytes != 0);
+	return i;
+}
+void seek(uint32_t new_filepos) {
+	char buf[7];
+	buf[0] = 'p';
+	buf[1] = 2;
+	buf[2] = filepos & 0xFF;
+	buf[3] = (filepos >> 8) & 0xFF;
+	buf[4] = (filepos >> 16) & 0xFF;
+	buf[5] = (filepos >> 24) & 0xFF;
+	buf[6] = '\0';
+	filepos = new_filepos;
+	cbm_open(15, 8, 15, buf);
+	cbm_close(15);
 }
 /// @brief Checks if the header in LFN 2 is correct
 /// @return True if it is, false otherwise
@@ -103,8 +149,6 @@ int uploadimage(const char *filename) {
 	uint8_t *image_end = BANK_RAM;
 	// 16 bit variables
 	size_t i = 0, j = 0, x = 0, y = 0, value = 0, bitmask = 0;
-	// Variables for the VERA width and height values
-	size_t vera_w = 320, vera_h = 240;
 	// The max address of the VERA
 	uint16_t vera_max = 0;
 	// 32 bit variables, used sparingly
@@ -119,6 +163,7 @@ int uploadimage(const char *filename) {
 	uint8_t version;
 	// True if all palette entries are significant
 	bool all_significant;
+	vera_w = 320, vera_h = 240;
 	// Open the file
 	cbm_k_setnam(filename);
 	cbm_k_setlfs(2, 8, 2);
@@ -135,6 +180,9 @@ int uploadimage(const char *filename) {
 	}
 	// Read the header
 	version = read8();
+	if (version != 1) {
+		printf("Warning: Unknown version %u!\n", version);
+	}
 	bitdepth = read8();
 	// Verify the bitdepth
 	if (bitdepth == 0) {
@@ -142,7 +190,14 @@ int uploadimage(const char *filename) {
 		return 1;
 	}
 	vera_bit_depth = read8();
+	if (vera_bit_depth & 0b11 != vera_bit_depth) {
+		printf("Warning: Invalid VERA bitdepth %2x\n", vera_bit_depth);
+	}
 	vera_bit_depth &= 0b11;
+	if (1 << vera_bit_depth != bitdepth) {
+		printf("Warning: VERA bitdepth mismatch: %ubpp vs %ubpp\n", 1 << vera_bit_depth, bitdepth);
+		bitdepth = 1 << vera_bit_depth;
+	}
 	config |= vera_bit_depth;
 	// Calculate the amount of pixels that can fit in a byte, used later
 	pixels_per_byte = 8 / bitdepth;
@@ -158,35 +213,59 @@ int uploadimage(const char *filename) {
 	// Get the list of significant palette entires
 	significant_palette_entries = read8();
 	significant_palette_start = read8();
+	palette_entry_count = significant_palette_entries;
 	if (significant_palette_entries == 0) {
 		printf("All palette entries significant.\n");
 		all_significant = true;
 		significant_palette_start = 0;
+		palette_entry_count = 256;
 	} else {
 		printf("%u palette entries significant\nstarting at %u.\n", significant_palette_entries, significant_palette_start);
 	}
+	palette_size = palette_entry_count * 2;
+	palette_start_byte = ((uint16_t)significant_palette_start) * 2;
+	printf("Palette: $1f%03x -> $1f%03x (len: $%03x)\n", palette_start_byte + 0xA00, palette_start_byte + 0xA00 + palette_size, palette_size);
 	imgdatastart = read16();
+	expected_data_begin = 32 + palette_size;
+	if (imgdatastart != expected_data_begin) {
+		printf("Warning: Unsupported or corrupted image file.\n");
+		printf("Image data start was incorrect!\n");
+		printf("Expected: %u, got: %u\n", expected_data_begin, imgdatastart);
+		imgdatastart = expected_data_begin;
+	} else {
+		printf("Image data start looks good!\n");
+	}
 	printf("Image starts at 0-indexed offset %4x\n", imgdatastart);
 	direct_to_vera = width == vera_w && height == vera_h;
-	if ((int8_t)read8() == -1) {
-		compress = true;
-	};
+	compression_type = (CompressionType)read8();
+	switch (compression_type) {
+		case LZSA2: {
+			printf("Using LZSA2 compression\n");
+		} break;
+		case NONE: {
+			printf("Using no compression\n");
+		} break;
+		default: {
+			printf("ERROR: Invalid compression type!");
+			return -1;
+		}
+	}
 	// Load the border color
 	borderidx = read8();
 	printf("Skipping reserved bytes...\n");
-	for (i = 0; i < 16; i++) {
+	while (filepos < 32) {
 		read8();
 	}
 	printf("Border color: %02x\n", borderidx);
 	printf("Reading palette entries...\n");
-	for (i = 0; i < (all_significant ? 512 : (uint16_t)significant_palette_entries*2); i++) {
+	for (i = 0; i < palette_size; i++) {
 		// Only load the required palette entries
 		palette[i+(significant_palette_start*2)] = read8();
 	}
 	// If the VERA was set up for a 640p image, make sure to keep track of that
 	if (over320) {
-		vera_w *= 2;
-		vera_h *= 2;
+		vera_w = 640;
+		vera_h = 480;
 	}
 	// Calculate the maximum address and bank
 	vera_max_32 = ((uint32_t)vera_w * (uint32_t)vera_h)/(uint32_t)pixels_per_byte;
@@ -198,6 +277,20 @@ int uploadimage(const char *filename) {
 	VERA.layer0.config = config;
 	// Make sure the TILEW value is set up correctly
 	VERA.layer0.tilebase = over320 ? 1 : 0;
+	if (filepos != imgdatastart) {
+		printf("WARNING: The current file position does not\ncorrespond to the image data's start!\n");
+		printf("File position: %4x\nImage data beginning: %4x\n", filepos, imgdatastart);
+		if (imgdatastart == 0) {
+			printf("Assuming imgdatastart was left uninitialized. Not seeking.");
+		} else {
+			while (filepos < imgdatastart) {
+				read8();
+			}
+			if (filepos > imgdatastart) {
+				seek(imgdatastart);
+			}
+		}
+	}
 	// Debugging
 	printf("Loading %simage bytes: $%lx\n", compress ? "compressed " : "", imgdatabytes);
 	printf("Image width: %u, image height: %u\npixels per byte: %u\n", width, height, pixels_per_byte);
@@ -216,7 +309,7 @@ int uploadimage(const char *filename) {
 	if (compress) {
 		RAM_BANK = 1;
 		do {
-			i = cx16_k_macptr(0, true, image_end);
+			i = readbuf(image_end, 0, true);
 			image_end += i;
 			if (RAM_BANK > 1) {
 				printf("Error: Cannot decompress memory because compressed data is too large.\n");
@@ -239,7 +332,7 @@ int uploadimage(const char *filename) {
 			DEBUG_PORT1 = 0;
 		} else {
 			do {
-				bytes_read = cx16_k_macptr(0, false, &VERA.data0);
+				bytes_read = readbuf(&VERA.data0, 0, false);
 			} while (bytes_read > 0);
 		}
 	} else {
@@ -253,7 +346,7 @@ int uploadimage(const char *filename) {
 			}
 			if (x < width && y < height) {
 				// Load the image's bytes, up to the bytes per row - the x value in bytes
-				bytes_read = cx16_k_macptr((((width) - x))/pixels_per_byte, false, &VERA.data0);
+				bytes_read = readbuf(&VERA.data0, (((width) - x))/pixels_per_byte, false);
 			} else {
 				// Fill the remaining pixels in the row with the border color using a fast assembly routine
 				tmp = (vera_w-x)/pixels_per_byte;
@@ -299,13 +392,20 @@ void set_text_color(uint8_t color) {
 		VERA.data0 = color;
 	}
 }
+typedef enum {
+	LayerBoth = 0b11,
+	LayerGraphics = 0b01,
+	LayerText = 0b10
+} LayerState;
 int main(int argc, char **argv) {
 	char *buf;
 	int ret;
-	bool done, text_visible;
+	bool done;
+	LayerState layers;
 	char ch;
 	uint8_t coloridx = 1;
 	size_t i;
+	bool second_row;
 	backup_palette();
 	buf = (char*)malloc(81);
 	printf("Enter viewable file name: ");
@@ -324,20 +424,33 @@ int main(int argc, char **argv) {
 	set_text_256color(true);
 	printf("Press arrow keys to change text colors.");
 	gotoxy(0, 0);
-	printf("[ESC] to exit, [SPACE] to toggle text.");
 	coloridx = significant_palette_start - 1;
 	set_text_color(coloridx);
+	second_row = vera_h <= 320;
+	if (second_row) {
+		gotoxy(0, (vera_h>>3)-2);
+		printf("[F1] Text   [F3] Both   \n[F2] Graph  [ESC] Exit  ");
+	} else {
+		gotoxy(0, (vera_h>>3)-1);
+		printf("[F1] Text   [F2] Graph  [F3] Both   [ESC] Exit  ");
+	}
 	done = false;
-	text_visible = true;
+	layers = LayerBoth;
 	while (!done) {
 		while (kbhit()) {
 			ch = cgetc();
 			if (ch == CH_ESC) {
 				done = true;
 				break;
-			} else if (ch == ' ') {
-				text_visible = !text_visible;
-				vera_layer_enable(0b1 | (text_visible ? 0b10 : 0));
+			} else if (ch == CH_F1) {
+				layers = LayerText;
+				vera_layer_enable(layers);
+			} else if (ch == CH_F2) {
+				layers = LayerGraphics;
+				vera_layer_enable(layers);
+			} else if (ch == CH_F3) {
+				layers = LayerBoth;
+				vera_layer_enable(layers);
 			} else if (ch == CH_CURS_LEFT) {
 				set_text_color(--coloridx);
 			} else if (ch == CH_CURS_RIGHT) {
